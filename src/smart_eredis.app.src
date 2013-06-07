@@ -1,0 +1,12 @@
+{application, smart_eredis,
+ [
+  {description, ""},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { smart_eredis_app, []}},
+  {env, [{config, "etc/smart_eredis.config"}]}
+ ]}.
