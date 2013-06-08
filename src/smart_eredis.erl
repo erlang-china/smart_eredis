@@ -241,7 +241,7 @@ get_client_by_algo(PoolName, _Key, random, Options, IfDebugging) ->
         true ->
             random:seed(os:timestamp()),
             Id = random:uniform(Len),
-            case eredis_pool:get_client(PoolName, Id) of 
+            case get_client(PoolName, Id) of 
                 {ok, Client} ->
                     case IfDebugging of
                         false->
