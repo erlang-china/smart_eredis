@@ -1,6 +1,6 @@
 -module(eredis_keeper).
 
--behaviour(gen_server2).
+-behaviour(gen_server).
 
 -include("eredis_pool.hrl").
 
@@ -15,16 +15,16 @@
 
 start_link(Pool) when is_record(Pool, eredis_pool)->
     #eredis_pool{name = PoolName} = Pool,
-    gen_server2:start_link({local, PoolName}, ?MODULE, [Pool], []).
+    gen_server:start_link({local, PoolName}, ?MODULE, [Pool], []).
 
 get_status(PoolName) ->
-    gen_server2:call(PoolName,{get_status}).
+    gen_server:call(PoolName,{get_status}).
 
 all_clients(PoolName)->
-    gen_server2:call(PoolName,{all_clients}).
+    gen_server:call(PoolName,{all_clients}).
 
 get_client(PoolName, Id)->
-    gen_server2:call(PoolName,{get_client, Id}).
+    gen_server:call(PoolName,{get_client, Id}).
 %% ====================================================================
 %% Behavioural functions 
 %% ====================================================================
@@ -109,6 +109,10 @@ connect_to_server(PoolName, Server) when is_record(Server, redis)->
             password = Password} = Server,
     {ok, Pid} = eredis:start_link(Host, Port,  Db, Password),
     watch_eredis(PoolName, Server, self() , Pid, FunWatchEredis),
+    gen_server:cast(eredis_pool, {on_eredis_client_update, 
+                                  PoolName,
+                                  Id, 
+                                  Pid}),
     {Id, Pid}.
 
 get_watch_eredis_fun()->

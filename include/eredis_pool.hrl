@@ -17,7 +17,9 @@
                        options   :: list()
                       }).
 
--define(TAB_CONFIG, ets_smart_eredis_config).
--define(KEEPER_SUP, eredis_keeper_sup).
+-define(TAB_CONFIG,      ets_smart_eredis_config).
+-define(TAB_CLIENT_PIDS, ets_eredis_pool_clients).
+-define(KEEPER_SUP,      eredis_keeper_sup).
+
 
 -endif.

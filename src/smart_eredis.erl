@@ -10,6 +10,12 @@
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
+-export([all_clients/0, all_clients/1, get_client/2]).
+
+-export([all_pools/0, get_pool/1]).
+
+-export([start_pool/1, stop_pool/1]).
+
 %%eredis proxy
 -export([q/3, q/4, qp/3, qp/4, q_noreply/3]).
 
@@ -30,17 +36,69 @@ start() ->
 stop() ->
     application:stop(?MODULE).
 
+start_pool(Pool) when is_record(Pool, eredis_pool) ->
+    gen_server:call(?MODULE,{start_pool, Pool}).
+
+stop_pool(PoolName) when is_atom(PoolName)->
+    gen_server:call(?MODULE,{stop_pool, PoolName}).
+
+all_pools()->
+    ets:match_object(?TAB_CONFIG, '$1').
+
+get_pool(PoolName) ->
+    case ets:lookup(?TAB_CONFIG, PoolName) of 
+        [Object]->
+            {ok, Object};
+        _->
+            {error, pool_not_found}
+    end.
+
+all_clients() ->
+    ets:match_object(?TAB_CLIENT_PIDS, '$1').
+
+all_clients(PoolName) ->
+    ets:match_object(?TAB_CLIENT_PIDS, {{PoolName, '_'}, '_'}).
+
+get_client(PoolName, Id) ->
+    case ets:lookup(?TAB_CLIENT_PIDS, {PoolName, Id}) of 
+        [{{PoolName, Id}, Client}] ->
+            {ok, Client};
+        _->
+            {error , not_found}
+    end.    
+
 %% @private
 init([]) ->
     case init_envs() of 
         ok->
-            init_config_table();
-            
+            init_config_table(),
+            Pools = get_pools_models(),
+            true  = ets:insert(?TAB_CONFIG, Pools);
         {error, Reason} ->
             error_logger:error_msg("load config error:~n~p~n", [Reason])
     end,
     {ok, #state{}}.
 
+handle_call({start_pool, Pool}, _From, State) when is_record(Pool, eredis_pool)->
+    Reply = 
+    case eredis_pool:start_pool(Pool) of
+        {ok, Pid} ->
+            true = ets:insert(?TAB_CONFIG, Pool),
+            {ok, Pid};
+        Error ->
+            Error
+    end,
+    {reply, Reply, State};
+handle_call({stop_pool, PoolName}, _From, State) ->
+    Reply = 
+    case eredis_pool:stop_pool(PoolName) of
+        ok ->
+            ets:delete(?TAB_CONFIG, PoolName),
+            ok;
+        Error ->
+            Error
+    end,
+    {reply, Reply, State};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
@@ -48,11 +106,6 @@ handle_call(_Request, _From, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-
-handle_info({?KEEPER_SUP, init}, State) ->
-    Pools = get_pools_model(),
-            start_pools(Pools),
-    {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -88,8 +141,7 @@ init_config_table() ->
                                          {read_concurrency,  true}]),
     ok.
 
-
-get_pools_model() ->
+get_pools_models() ->
     {ok, PoolsOptions}  = get_env(pools),
     [begin
         {PoolName, Servers, Scheduling, Options} = Pool,
@@ -120,13 +172,6 @@ get_pools_model() ->
                       scheduling = SchedulingRec}
      end
     ||Pool <-PoolsOptions].
-
-start_pools(Pools) when is_list(Pools) ->
-    [ begin 
-        {ok, _Pid} = eredis_pool:start_pool(P),
-        true = ets:insert(?TAB_CONFIG, P)
-      end|| P<- Pools],
-      ok.
 
 get_env(Par) ->
     application:get_env(smart_eredis, Par).
@@ -175,14 +220,6 @@ dbg(Client,     Id,  Key,  _Timeout) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Helper Func
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-get_pool(PoolName) ->
-    case ets:lookup(?TAB_CONFIG, PoolName) of 
-        [Object]->
-            {ok, Object};
-        _->
-            {error, pool_not_found}
-    end.
-
 get_client_by_algo(PoolName, Key) ->
     case get_pool(PoolName) of 
         {ok, Pool}->
@@ -210,7 +247,7 @@ get_client_by_algo(PoolName, _Key, random, Options, IfDebugging) ->
                         false->
                             {ok, Id, Client, undefined};
                         true->
-                            case eredis_pool:get_client(PoolName, debug) of 
+                            case get_client(PoolName, debug) of 
                                  {ok, DbgClient} ->
                                     {ok, Id, Client, DbgClient};
                                  _->

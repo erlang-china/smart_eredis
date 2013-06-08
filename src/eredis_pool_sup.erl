@@ -1,5 +1,7 @@
 -module(eredis_pool_sup).
 
+-include("eredis_pool.hrl").
+
 -behaviour(supervisor).
 
 %% API
@@ -23,6 +25,6 @@ start_link() ->
 %% ===================================================================
 
 init([]) ->
-    {ok, { {one_for_one, 5, 10}, [?CHILD(eredis_keeper_sup, supervisor), 
-                                  ?CHILD(eredis_pool, worker)]} }.
+    {ok, { {one_for_one, 50, 100}, [?CHILD(eredis_pool, worker),
+                                    ?CHILD(?KEEPER_SUP, supervisor)]} }.
 
