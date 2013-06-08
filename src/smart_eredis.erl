@@ -166,10 +166,11 @@ q_noreply(PoolName, Key, Command) ->
     end.
 
 dbg(undefined, _Id, _Key, _Timeout) -> ok;
-dbg(Client,     Id,  Key,  Timeout) ->
-    CMD = [["HINCRBY", Key, Id, 1],
-           ["HSET", Key, "time", util_time:string_now()]],
-    eredis:qp(Client, CMD, Timeout).
+dbg(Client,     Id,  Key,  _Timeout) ->
+    CMD_COUNTER = ["HINCRBY", Key, Id, 1],
+    CMD_TIME    = ["HSET", Key, "time", util_time:string_now()],
+    eredis:q_noreply(Client, CMD_COUNTER),
+    eredis:q_noreply(Client, CMD_TIME).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Helper Func
