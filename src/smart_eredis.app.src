@@ -5,7 +5,9 @@
   {registered, []},
   {applications, [
                   kernel,
-                  stdlib
+                  stdlib,
+                  ets_mgr,
+                  ketama
                  ]},
   {mod, { smart_eredis_app, []}},
   {env, [{config, "etc/smart_eredis.config"}]}

@@ -2,6 +2,8 @@
 
 -include("eredis_pool.hrl").
 
+-include_lib("ketama/include/ketama.hrl").
+
 -behaviour(gen_server2).
 
 -export([start_link/0]).
@@ -31,6 +33,7 @@ start_link() ->
 
 start() ->
     ensure_started(ets_mgr),
+    ensure_started(ketama),
     application:start(?MODULE).
 
 stop() ->
@@ -147,29 +150,31 @@ get_pools_models() ->
         {PoolName, Servers, Scheduling, Options} = Pool,
         FormattedServer = 
         [ begin 
-        Id   = util_plist:get_value(id,       Server),
-        Host = util_plist:get_value(host,     Server),
-        Port = util_plist:get_value(port,     Server),
-        Db   = util_plist:get_value(database, Server),
-        Pwd  = util_plist:get_value(password, Server),
-        #redis{ id       = Id, 
-                host     = Host, 
-                port     = Port, 
-                database = Db, 
-                password = Pwd }
-        end||Server <- Servers],
-        IfDebugging = util_plist:get_value(debug, Options, false),
+          Id   = util_plist:get_value(id,       Server),
+          Host = util_plist:get_value(host,     Server),
+          Port = util_plist:get_value(port,     Server),
+          Db   = util_plist:get_value(database, Server),
+          Pwd  = util_plist:get_value(password, Server),
+          #redis{ id       = Id, 
+                  host     = Host, 
+                  port     = Port, 
+                  database = Db, 
+                  password = Pwd }
+          end||Server <- Servers],
 
-        Algorithm   = util_plist:get_value(algorithm, Scheduling),
-        AlgoOpts    = util_plist:get_value(options,   Scheduling),
+          IfDebugging = util_plist:get_value(debug, Options, false),
+          Algorithm   = util_plist:get_value(algorithm, Scheduling),
+          AlgoOpts    = util_plist:get_value(options,   Scheduling),
         
-        SchedulingRec = #scheduling{algorithm = Algorithm, 
-                                    options   = AlgoOpts},
+          SchedulingRec = #scheduling{algorithm = Algorithm, 
+                                      options   = AlgoOpts},
         
-        #eredis_pool{ name       = PoolName, 
-                      servers    = FormattedServer, 
-                      debug      = IfDebugging,
-                      scheduling = SchedulingRec}
+          ok = init_algoritm(PoolName, Algorithm, AlgoOpts),
+
+          #eredis_pool{ name       = PoolName, 
+                        servers    = FormattedServer, 
+                        debug      = IfDebugging,
+                        scheduling = SchedulingRec}
      end
     ||Pool <-PoolsOptions].
 
@@ -203,7 +208,7 @@ qp(PoolName, Key, Pipeline, Timeout) ->
 
 q_noreply(PoolName, Key, Command) ->
     case get_client_by_algo(PoolName, Key) of 
-        {ok,Id, Client, DbgClient} ->
+        {ok, Id, Client, DbgClient} ->
             dbg(DbgClient, Id, Key, ?TIMEOUT),
             eredis:q_noreply(Client, Command);
         Error->
@@ -218,7 +223,33 @@ dbg(Client,     Id,  Key,  _Timeout) ->
     eredis:q_noreply(Client, CMD_TIME).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Helper Func
+%% Internal Functions
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+init_algoritm(PoolName, ketama, Options) ->
+    case ketama:is_ring_exist(PoolName) of
+        false ->
+            ketama:add_ring(PoolName),
+            Nodes = util_plist:get_value(nodes, Options),
+            [begin 
+              Node = 
+              #node{ id          = NodeId, 
+                    hash_seed    = HashSeed, 
+                    vnode_number = VNodeNum, 
+                    object       = Object},
+             ok = ketama:add_node(PoolName, Node)
+             end
+            || {NodeId, HashSeed, VNodeNum, Object} <-Nodes],
+            ok;
+        true ->
+            ok
+    end;
+init_algoritm(_PoolName, random, _Options) ->
+    ok;
+init_algoritm(_PoolName, _, _Options) ->
+    ok.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Helper Functions
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 get_client_by_algo(PoolName, Key) ->
     case get_pool(PoolName) of 
@@ -227,38 +258,42 @@ get_client_by_algo(PoolName, Key) ->
                           scheduling = #scheduling{ algorithm = Algorithm, 
                                                     options   = Options}
                           } = Pool,
-            get_client_by_algo(PoolName, Key, Algorithm, Options, IfDebugging);
+            case get_client_id_by_algo(PoolName, Key, Algorithm, Options) of 
+                {ok, Id} ->
+                    case get_client(PoolName, Id) of 
+                        {ok, Client} ->
+                            case IfDebugging of
+                                false->
+                                    {ok, Id, Client, undefined};
+                                true->
+                                    case get_client(PoolName, debug) of 
+                                         {ok, DbgClient} ->
+                                            {ok, Id, Client, DbgClient};
+                                         _->
+                                            {ok, Id, Client, undefined}
+                                    end
+                            end;
+                        _->
+                            {error, no_available_client}
+                    end;
+                ErrorGetClientId ->
+                    ErrorGetClientId
+            end;
         ErrorFindPool->
             ErrorFindPool
     end.
 
-get_client_by_algo(_PoolName, _Key, ketama, _Options, _IfDebugging) ->
-    {error, algorithm_not_implament};
-get_client_by_algo(PoolName, _Key, random, Options, IfDebugging) ->
+get_client_id_by_algo(PoolName, Key, ketama, _Options) ->
+    ketama:get_object(PoolName, Key);
+get_client_id_by_algo(_PoolName, _Key, random, Options) ->
     Ids = util_plist:get_value(ids, Options, []),
     Len = length(Ids),
     case Len > 0 of
         true ->
             random:seed(os:timestamp()),
-            Id = random:uniform(Len),
-            case get_client(PoolName, Id) of 
-                {ok, Client} ->
-                    case IfDebugging of
-                        false->
-                            {ok, Id, Client, undefined};
-                        true->
-                            case get_client(PoolName, debug) of 
-                                 {ok, DbgClient} ->
-                                    {ok, Id, Client, DbgClient};
-                                 _->
-                                    {ok, Id, Client, undefined}
-                            end
-                    end;
-                _->
-                    {error, no_available_client}
-            end;
+            {ok, random:uniform(Len)};
         false ->
             {error, no_random_ids}
     end;
-get_client_by_algo(_PoolName, _Key,undefined, _Options, _IfDebugging) ->
+get_client_id_by_algo(_PoolName, _Key, undefined, _Options) ->
     {error ,unknown_scheduling_algorithm}.
