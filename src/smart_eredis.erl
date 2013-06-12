@@ -228,7 +228,12 @@ dbg(Client,     Id,  Key,  _Timeout) ->
 init_algoritm(PoolName, ketama, Options) ->
     case ketama:is_ring_exist(PoolName) of
         false ->
-            ketama:add_ring(PoolName, specific),
+            RingOpt = 
+            #ring_opt{name            = PoolName, 
+                      expand_node     = false, 
+                      match_operator  = '>',
+                      copies_gen_type = specific},
+            ketama:add_ring(RingOpt),
             Nodes = util_plist:get_value(nodes, Options),
             [begin 
               Node = 
