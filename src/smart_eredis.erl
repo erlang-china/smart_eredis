@@ -228,17 +228,17 @@ dbg(Client,     Id,  Key,  _Timeout) ->
 init_algoritm(PoolName, ketama, Options) ->
     case ketama:is_ring_exist(PoolName) of
         false ->
-            ketama:add_ring(PoolName),
+            ketama:add_ring(PoolName, specific),
             Nodes = util_plist:get_value(nodes, Options),
             [begin 
               Node = 
               #node{ id          = NodeId, 
                     hash_seed    = HashSeed, 
-                    vnode_number = VNodeNum, 
+                    copies_num   = CopiesNum, 
                     object       = Object},
              ok = ketama:add_node(PoolName, Node)
              end
-            || {NodeId, HashSeed, VNodeNum, Object} <-Nodes],
+            || {NodeId, HashSeed, CopiesNum, Object} <-Nodes],
             ok;
         true ->
             ok
