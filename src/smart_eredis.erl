@@ -229,11 +229,19 @@ dbg(Client,     Id,  Key,  _Timeout) ->
 init_algorithm(PoolName, ketama, Options) ->
     case ketama:is_ring_exist(PoolName) of
         false ->
+            PROpts  = util_plist:get_value(ring_opt, Options, []),
+            NCopies = util_plist:get_value(node_copies, PROpts, 40),
+            Expand  = util_plist:get_value(expand_node, PROpts, true),
+            MatchOp = util_plist:get_value(match_operator, PROpts, '>='),
+            ConChar = util_plist:get_value(concat_char, PROpts, ":"),
+            GenType = util_plist:get_value(copies_gen_type, PROpts, weight),
             RingOpt = 
-            #ring_opt{name            = PoolName, 
-                      expand_node     = false, 
-                      match_operator  = '>',
-                      copies_gen_type = specific},
+            #ring_opt{name            = PoolName,
+                      node_copies     = NCopies,
+                      expand_node     = Expand, 
+                      match_operator  = MatchOp,
+                      concat_char     = ConChar,
+                      copies_gen_type = GenType},
             ketama:add_ring(RingOpt),
             Nodes = util_plist:get_value(nodes, Options),
             [begin 
