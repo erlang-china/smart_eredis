@@ -13,8 +13,8 @@
                       scheduling
                       }).
 
--record(scheduling,  { algorithm :: atom(), 
-                       options   :: list()
+-record(scheduling,  { algorithm         :: atom(), 
+                       runtime_options   :: list()
                       }).
 
 -define(TAB_CONFIG,      ets_smart_eredis_config).

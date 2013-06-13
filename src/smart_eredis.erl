@@ -162,14 +162,15 @@ get_pools_models() ->
                   password = Pwd }
           end||Server <- Servers],
 
-          IfDebugging = util_plist:get_value(debug, Options, false),
-          Algorithm   = util_plist:get_value(algorithm, Scheduling),
-          AlgoOpts    = util_plist:get_value(options,   Scheduling),
+          IfDebugging  = util_plist:get_value(debug, Options, false),
+          Algorithm    = util_plist:get_value(algorithm, Scheduling),
+          InitAlgoOpts = util_plist:get_value(init_options, Scheduling, []),
+          RTAlgoOpts   = util_plist:get_value(runtime_options, Scheduling, []),
         
-          SchedulingRec = #scheduling{algorithm = Algorithm, 
-                                      options   = AlgoOpts},
+          SchedulingRec = #scheduling{ algorithm         = Algorithm, 
+                                       runtime_options   = RTAlgoOpts},
         
-          ok = init_algorithm(PoolName, Algorithm, AlgoOpts),
+          ok = init_algorithm(PoolName, Algorithm, InitAlgoOpts),
 
           #eredis_pool{ name       = PoolName, 
                         servers    = FormattedServer, 
@@ -248,9 +249,9 @@ init_algorithm(PoolName, ketama, Options) ->
         true ->
             ok
     end;
-init_algoritm(_PoolName, random, _Options) ->
+init_algorithm(_PoolName, random, _Options) ->
     ok;
-init_algoritm(_PoolName, _, _Options) ->
+init_algorithm(_PoolName, _, _Options) ->
     ok.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -260,8 +261,8 @@ get_client_by_algo(PoolName, Key) ->
     case get_pool(PoolName) of 
         {ok, Pool}->
             #eredis_pool{ debug      = IfDebugging, 
-                          scheduling = #scheduling{ algorithm = Algorithm, 
-                                                    options   = Options}
+                          scheduling = #scheduling{ algorithm       = Algorithm, 
+                                                    runtime_options = Options}
                           } = Pool,
             case get_client_id_by_algo(PoolName, Key, Algorithm, Options) of 
                 {ok, Id} ->
