@@ -169,7 +169,7 @@ get_pools_models() ->
           SchedulingRec = #scheduling{algorithm = Algorithm, 
                                       options   = AlgoOpts},
         
-          ok = init_algoritm(PoolName, Algorithm, AlgoOpts),
+          ok = init_algorithm(PoolName, Algorithm, AlgoOpts),
 
           #eredis_pool{ name       = PoolName, 
                         servers    = FormattedServer, 
@@ -225,7 +225,7 @@ dbg(Client,     Id,  Key,  _Timeout) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Internal Functions
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-init_algoritm(PoolName, ketama, Options) ->
+init_algorithm(PoolName, ketama, Options) ->
     case ketama:is_ring_exist(PoolName) of
         false ->
             RingOpt = 
@@ -237,10 +237,10 @@ init_algoritm(PoolName, ketama, Options) ->
             Nodes = util_plist:get_value(nodes, Options),
             [begin 
               Node = 
-              #node{ id          = NodeId, 
-                    hash_seed    = HashSeed, 
-                    copies_num   = CopiesNum, 
-                    object       = Object},
+              #node{ id         = NodeId, 
+                     hash_seed  = HashSeed, 
+                     copies_num = CopiesNum, 
+                     object     = Object},
              ok = ketama:add_node(PoolName, Node)
              end
             || {NodeId, HashSeed, CopiesNum, Object} <-Nodes],
@@ -289,7 +289,8 @@ get_client_by_algo(PoolName, Key) ->
     end.
 
 get_client_id_by_algo(PoolName, Key, ketama, _Options) ->
-    ketama:get_object(PoolName, Key);
+    {ok, {_NodeId, Object}} = ketama:get_object(PoolName, Key),
+    {ok , Object};
 get_client_id_by_algo(_PoolName, _Key, random, Options) ->
     Ids = util_plist:get_value(ids, Options, []),
     Len = length(Ids),
