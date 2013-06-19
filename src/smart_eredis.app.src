@@ -1,7 +1,7 @@
 {application, smart_eredis,
  [
-  {description, ""},
-  {vsn, "1"},
+  {description, "a client of redis pool that use ketama algorithm to route key"},
+  {vsn, "1.0.0"},
   {registered, []},
   {applications, [
                   kernel,
