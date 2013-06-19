@@ -67,7 +67,7 @@ code_change(_OldVsn, State, _Extra) ->
 internal_start_pool(Pool) when is_record(Pool, eredis_pool) ->
     #eredis_pool{name = PoolName} = Pool,
     case whereis(?KEEPER_SUP) of
-        Pid when is_pid(Pid)->  
+        SupPid when is_pid(SupPid)->  
             case supervisor:start_child(?KEEPER_SUP,
                                         {PoolName, {eredis_keeper, 
                                                     start_link, 
