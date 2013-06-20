@@ -7,6 +7,7 @@
                   kernel,
                   stdlib,
                   ets_mgr,
+                  mini_pool,
                   ketama
                  ]},
   {mod, { smart_eredis_app, []}},

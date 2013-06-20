@@ -24,5 +24,4 @@ start_link() ->
 %% ===================================================================
 
 init([]) ->
-    {ok, { {one_for_one, 50, 100}, [?CHILD(smart_eredis, worker),
-                                    ?CHILD(eredis_pool_sup, supervisor)]} }.
+    {ok, { {one_for_one, 50, 100}, [?CHILD(smart_eredis, worker)]} }.

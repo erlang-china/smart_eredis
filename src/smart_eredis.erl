@@ -1,8 +1,9 @@
 -module(smart_eredis).
 
--include("eredis_pool.hrl").
+-include("smart_eredis.hrl").
 
 -include_lib("ketama/include/ketama.hrl").
+-include_lib("mini_pool/include/mini_pool.hrl").
 
 -behaviour(gen_server2).
 
@@ -12,7 +13,7 @@
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
--export([all_clients/0, all_clients/1, get_client/2]).
+-export([ all_clients/1, get_client/2]).
 
 -export([all_pools/0, get_pool/1]).
 
@@ -33,13 +34,14 @@ start_link() ->
 
 start() ->
     ensure_started(ets_mgr),
+    ensure_started(mini_pool),
     ensure_started(ketama),
     application:start(?MODULE).
 
 stop() ->
     application:stop(?MODULE).
 
-start_pool(Pool) when is_record(Pool, eredis_pool) ->
+start_pool(Pool) when is_record(Pool, smart_eredis) ->
     gen_server:call(?MODULE,{start_pool, Pool}).
 
 stop_pool(PoolName) when is_atom(PoolName)->
@@ -56,35 +58,43 @@ get_pool(PoolName) ->
             {error, pool_not_found}
     end.
 
-all_clients() ->
-    ets:match_object(?TAB_CLIENT_PIDS, '$1').
+% all_clients() ->
+%     ets:match_object(?TAB_CLIENT_PIDS, '$1').
 
 all_clients(PoolName) ->
-    ets:match_object(?TAB_CLIENT_PIDS, {{PoolName, '_'}, '_'}).
+    mini_pool:get_pool(PoolName).
 
 get_client(PoolName, Id) ->
-    case ets:lookup(?TAB_CLIENT_PIDS, {PoolName, Id}) of 
-        [{{PoolName, Id}, Client}] ->
-            {ok, Client};
-        _->
-            {error , not_found}
-    end.    
+    mini_pool:get_pool(PoolName, Id).
 
 %% @private
 init([]) ->
     case init_envs() of 
         ok->
             init_config_table(),
-            Pools = get_pools_models(),
-            true  = ets:insert(?TAB_CONFIG, Pools);
+            Models = get_pools_models(),
+            true  = ets:insert(?TAB_CONFIG, Models),
+            [
+                begin
+                    #smart_eredis{name = Name,servers = StartOpt} = Model,
+                    mini_pool:start_pool(#pool_option{ name      = Name,
+                                                       component =component_eredis_pool, 
+                                                       start_opt = StartOpt})
+                end
+            || Model<-Models];
         {error, Reason} ->
             error_logger:error_msg("load config error:~n~p~n", [Reason])
     end,
     {ok, #state{}}.
 
-handle_call({start_pool, Pool}, _From, State) when is_record(Pool, eredis_pool)->
-    Reply = 
-    case eredis_pool:start_pool(Pool) of
+handle_call({start_pool, #smart_eredis{ name    = Name, 
+                                        servers = StartOpt} = Pool}, 
+                                        _From, State)->
+    PoolOpt = #pool_option{ name      = Name, 
+                            component = component_eredis_pool,
+                            start_opt = StartOpt},
+    Reply   = 
+    case mini_pool:start_pool(PoolOpt) of
         {ok, Pid} ->
             true = ets:insert(?TAB_CONFIG, Pool),
             {ok, Pid};
@@ -94,7 +104,7 @@ handle_call({start_pool, Pool}, _From, State) when is_record(Pool, eredis_pool)-
     {reply, Reply, State};
 handle_call({stop_pool, PoolName}, _From, State) ->
     Reply = 
-    case eredis_pool:stop_pool(PoolName) of
+    case mini_pool:stop_pool(PoolName) of
         ok ->
             ets:delete(?TAB_CONFIG, PoolName),
             ok;
@@ -139,7 +149,7 @@ init_envs(FileName) ->
 init_config_table() ->
     ?TAB_CONFIG = ets_mgr:soft_new(?TAB_CONFIG, [ named_table,
                                          protected,
-                                         {keypos, #eredis_pool.name},
+                                         {keypos, #smart_eredis.name},
                                          {write_concurrency, false}, 
                                          {read_concurrency,  true}]),
     ok.
@@ -147,7 +157,7 @@ init_config_table() ->
 get_pools_models() ->
     {ok, PoolsOptions}  = get_env(pools),
     [begin
-        {PoolName, Servers, Scheduling, Options} = Pool,
+        {Name, Servers, Scheduling, Options} = Pool,
         FormattedServer = 
         [ begin 
           Id   = util_plist:get_value(id,       Server),
@@ -170,12 +180,12 @@ get_pools_models() ->
           SchedulingRec = #scheduling{ algorithm         = Algorithm, 
                                        runtime_options   = RTAlgoOpts},
         
-          ok = init_algorithm(PoolName, Algorithm, InitAlgoOpts),
+          ok = init_algorithm(Name, Algorithm, InitAlgoOpts),
 
-          #eredis_pool{ name       = PoolName, 
-                        servers    = FormattedServer, 
-                        debug      = IfDebugging,
-                        scheduling = SchedulingRec}
+          #smart_eredis{ name       = Name, 
+                         servers    = FormattedServer, 
+                         debug      = IfDebugging,
+                         scheduling = SchedulingRec}
      end
     ||Pool <-PoolsOptions].
 
@@ -268,9 +278,9 @@ init_algorithm(_PoolName, _, _Options) ->
 get_client_by_algo(PoolName, Key) ->
     case get_pool(PoolName) of 
         {ok, Pool}->
-            #eredis_pool{ debug      = IfDebugging, 
-                          scheduling = #scheduling{ algorithm       = Algorithm, 
-                                                    runtime_options = Options}
+            #smart_eredis{ debug      = IfDebugging, 
+                           scheduling = #scheduling{ algorithm       = Algorithm, 
+                                                     runtime_options = Options}
                           } = Pool,
             case get_client_id_by_algo(PoolName, Key, Algorithm, Options) of 
                 {ok, Id} ->
