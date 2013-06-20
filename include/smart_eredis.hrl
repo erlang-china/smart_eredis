@@ -13,10 +13,11 @@
                        scheduling
                       }).
 
--record(scheduling,  { algorithm         :: atom(), 
+-record(scheduling,  { get_client_id :: fun((atom(), string(), list()) ->
+                                                      ok | {error, term()}), 
                        runtime_options   :: list()
                       }).
 
--define(TAB_CONFIG,      ets_smart_eredis_config).
+-define(TAB_CONFIG, ets_smart_eredis_config).
 
 -endif.

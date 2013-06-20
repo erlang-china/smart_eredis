@@ -6,8 +6,7 @@
 
 -export([on_event/2, recover/2, start/1]).
 
-on_event(Msg, Option) ->
-    erlang:display({on_event, {Msg, Option}}).
+on_event(_Msg, _Option) -> ok.
 
 recover({Id, _Reason}, Servers) ->
     S = [Server|| #redis{id = RedisId} = Server <- Servers, RedisId =:= Id],

@@ -2,8 +2,8 @@
 
 -include("smart_eredis.hrl").
 
--include_lib("ketama/include/ketama.hrl").
 -include_lib("mini_pool/include/mini_pool.hrl").
+-include_lib("ketama/include/ketama.hrl").
 
 -behaviour(gen_server2).
 
@@ -11,7 +11,12 @@
 
 -export([start/0, stop/0]).
 
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
+-export([init/1, 
+         handle_call/3, 
+         handle_cast/2, 
+         handle_info/2, 
+         terminate/2, 
+         code_change/3]).
 
 -export([ all_clients/1, get_client/2]).
 
@@ -171,17 +176,17 @@ get_pools_models() ->
                   database = Db, 
                   password = Pwd }
           end||Server <- Servers],
-
           IfDebugging  = util_plist:get_value(debug, Options, false),
-          Algorithm    = util_plist:get_value(algorithm, Scheduling),
+          ModAlgorithm = util_plist:get_value(algorithm, Scheduling),
           InitAlgoOpts = util_plist:get_value(init_options, Scheduling, []),
           RTAlgoOpts   = util_plist:get_value(runtime_options, Scheduling, []),
-        
-          SchedulingRec = #scheduling{ algorithm         = Algorithm, 
-                                       runtime_options   = RTAlgoOpts},
-        
-          ok = init_algorithm(Name, Algorithm, InitAlgoOpts),
 
+          ok = util_misc:check_callback(smart_eredis_algorithm, ModAlgorithm),
+          SchedulingRec = 
+             #scheduling{ get_client_id   = fun ModAlgorithm:get_client_id/3, 
+                          runtime_options = RTAlgoOpts},
+
+          ok = ModAlgorithm:init(Name, InitAlgoOpts),
           #smart_eredis{ name       = Name, 
                          servers    = FormattedServer, 
                          debug      = IfDebugging,
@@ -234,55 +239,16 @@ dbg(Client,     Id,  Key,  _Timeout) ->
     eredis:q_noreply(Client, CMD_TIME).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Internal Functions
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-init_algorithm(PoolName, ketama, Options) ->
-    case ketama:is_ring_exist(PoolName) of
-        false ->
-            PROpts  = util_plist:get_value(ring_opt, Options, []),
-            NCopies = util_plist:get_value(node_copies, PROpts, 40),
-            Expand  = util_plist:get_value(expand_node, PROpts, true),
-            MatchOp = util_plist:get_value(match_operator, PROpts, '>='),
-            ConChar = util_plist:get_value(concat_char, PROpts, ":"),
-            GenType = util_plist:get_value(copies_gen_type, PROpts, weight),
-            RingOpt = 
-            #ring_opt{name            = PoolName,
-                      node_copies     = NCopies,
-                      expand_node     = Expand, 
-                      match_operator  = MatchOp,
-                      concat_char     = ConChar,
-                      copies_gen_type = GenType},
-            ketama:add_ring(RingOpt),
-            Nodes = util_plist:get_value(nodes, Options),
-            [begin 
-              Node = 
-              #node{ id         = NodeId, 
-                     hash_seed  = HashSeed, 
-                     copies_num = CopiesNum, 
-                     object     = Object},
-             ok = ketama:add_node(PoolName, Node)
-             end
-            || {NodeId, HashSeed, CopiesNum, Object} <-Nodes],
-            ok;
-        true ->
-            ok
-    end;
-init_algorithm(_PoolName, random, _Options) ->
-    ok;
-init_algorithm(_PoolName, _, _Options) ->
-    ok.
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Helper Functions
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 get_client_by_algo(PoolName, Key) ->
     case get_pool(PoolName) of 
         {ok, Pool}->
             #smart_eredis{ debug      = IfDebugging, 
-                           scheduling = #scheduling{ algorithm       = Algorithm, 
-                                                     runtime_options = Options}
+                           scheduling = #scheduling{get_client_id   = GetClient, 
+                                                    runtime_options = Options}
                           } = Pool,
-            case get_client_id_by_algo(PoolName, Key, Algorithm, Options) of 
+            case GetClient(PoolName, Key, Options) of 
                 {ok, Id} ->
                     case get_client(PoolName, Id) of 
                         {ok, Client} ->
@@ -306,19 +272,3 @@ get_client_by_algo(PoolName, Key) ->
         ErrorFindPool->
             ErrorFindPool
     end.
-
-get_client_id_by_algo(PoolName, Key, ketama, _Options) ->
-    {ok, {_NodeId, Object}} = ketama:get_object(PoolName, Key),
-    {ok , Object};
-get_client_id_by_algo(_PoolName, _Key, random, Options) ->
-    Ids = util_plist:get_value(ids, Options, []),
-    Len = length(Ids),
-    case Len > 0 of
-        true ->
-            random:seed(os:timestamp()),
-            {ok, random:uniform(Len)};
-        false ->
-            {error, no_random_ids}
-    end;
-get_client_id_by_algo(_PoolName, _Key, undefined, _Options) ->
-    {error ,unknown_scheduling_algorithm}.
