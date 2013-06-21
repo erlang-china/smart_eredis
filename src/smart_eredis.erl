@@ -34,7 +34,7 @@
          terminate/2, 
          code_change/3]).
 
--export([ all_clients/1, get_client/2]).
+-export([all_clients/1, get_client/2]).
 
 -export([all_pools/0, get_pool/1]).
 
@@ -42,6 +42,8 @@
 
 %%eredis proxy
 -export([q/3, q/4, qp/3, qp/4, q_noreply/3]).
+
+-export([enable_debug/2]).
 
 -define(SERVER, ?MODULE).
 
@@ -68,6 +70,9 @@ start_pool(Pool) when is_record(Pool, smart_eredis) ->
 stop_pool(PoolName) when is_atom(PoolName)->
     gen_server:call(?MODULE,{stop_pool, PoolName}).
 
+enable_debug(PoolName, Enable) when is_atom(PoolName), is_atom(Enable)->
+    gen_server:call(?MODULE,{enable_debug, PoolName, Enable}).
+
 all_pools()->
     ets:match_object(?TAB_CONFIG, '$1').
 
@@ -78,9 +83,6 @@ get_pool(PoolName) ->
         _->
             {error, pool_not_found}
     end.
-
-% all_clients() ->
-%     ets:match_object(?TAB_CLIENT_PIDS, '$1').
 
 all_clients(PoolName) ->
     mini_pool:get_pool(PoolName).
@@ -132,6 +134,9 @@ handle_call({stop_pool, PoolName}, _From, State) ->
         Error ->
             Error
     end,
+    {reply, Reply, State};
+handle_call({enable_debug, PoolName, Enable}, _From, State) ->
+    Reply = internal_enable_debug(PoolName, Enable),
     {reply, Reply, State};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_call}, State}.
@@ -196,6 +201,20 @@ get_pools_models() ->
           ModAlgorithm = util_plist:get_value(algorithm, Scheduling),
           InitAlgoOpts = util_plist:get_value(init_options, Scheduling, []),
           RTAlgoOpts   = util_plist:get_value(runtime_options, Scheduling, []),
+
+          IfDebugging  = 
+          case IfDebugging of 
+              true ->
+                case  [Server ||Server <- Servers, 
+                            util_plist:get_value(id, Server) == debug] of 
+                     [] ->
+                        false;
+                     _->
+                        true
+                end;
+              false ->
+                false
+          end,
 
           ok = util_misc:check_callback(smart_eredis_algorithm, ModAlgorithm),
           SchedulingRec = 
@@ -287,4 +306,26 @@ get_client_by_algo(PoolName, Key) ->
             end;
         ErrorFindPool->
             ErrorFindPool
+    end.
+
+internal_enable_debug(PoolName, Enable) ->
+    case get_pool(PoolName) of 
+        {ok, #smart_eredis{ debug   = EnabledState, 
+                            servers = Servers} = Pool} ->
+            case EnabledState of 
+                Enable ->
+                    {error, nothing_changed};
+                _->
+                    case [Server ||#redis{id = Id} =Server <- Servers, 
+                            Id == debug] of 
+                        [] ->
+                            {error, no_debug_redis_server};
+                        [DebugServer] ->
+                            true = ets:insert(?TAB_CONFIG, 
+                                      Pool#smart_eredis{debug = Enable}),
+                            {ok, DebugServer}
+                    end
+            end;
+        Error ->
+            Error
     end.
