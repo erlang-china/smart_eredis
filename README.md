@@ -99,17 +99,20 @@ and you need show clearly the key
 in the scecond parameter
 
 ***eredis***
+
 ```erlang
 {ok, <<"OK">>} = eredis:q(C, ["SET", "foo", "bar"]).
 ```
 
 ***smart_eredis***
+
 ```erlang
 {ok, <<"OK">>} = smart_eredis:q(pool_1, "foo", ["SET", "foo", "bar"]).
 ```
 
 #### customize your own algorithm
 you need to implament following behavior
+
 ```erlang
 -module(smart_eredis_algorithm).
 
@@ -125,6 +128,7 @@ you need to implament following behavior
 ```
 
 ***example:***
+
 ```erlang
 -module(algo_random).
 
