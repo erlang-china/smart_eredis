@@ -41,7 +41,7 @@
 -export([start_pool/1, stop_pool/1]).
 
 %%eredis proxy
--export([q/3, q/4, qp/3, qp/4, q_noreply/3]).
+-export([q/3, q/4, qp/2, qp/3, q_noreply/3]).
 
 -export([enable_debug/2]).
 
@@ -244,18 +244,20 @@ q(PoolName, Key, Command, Timeout) ->
             Error
     end.
 
-qp(PoolName, Key, Pipeline) ->
-    qp(PoolName, Key, Pipeline, ?TIMEOUT).
+qp(PoolName, Pipeline) ->
+    qp(PoolName, Pipeline, ?TIMEOUT).
 
-qp(PoolName, Key, Pipeline, Timeout) ->
-    case get_client_by_algo(PoolName, Key) of 
-        {ok, Id, Client, DbgClient} ->
-            dbg(DbgClient, Id, Key, Timeout),
-            eredis:qp(Client, Pipeline, Timeout);
-        Error->
-            Error
-    end.
-    
+qp(PoolName, Pipeline, Timeout) ->
+    {Normal, Exception} = group_pipeline(PoolName, Pipeline),
+    RedisRet =
+    [ begin
+        {Orders, CmdLines} = lists:unzip(Lines),
+        {ok, Client} = get_client(PoolName, Id),
+        lists:zip(Orders, eredis:qp(Client, CmdLines, Timeout))
+       end
+    || {Id, Lines} <- Normal], 
+    CombinedRet = orddict:from_list(lists:flatten(RedisRet ++ Exception)),
+    [Ret||{_Id, Ret}<-CombinedRet].
 
 q_noreply(PoolName, Key, Command) ->
     case get_client_by_algo(PoolName, Key) of 
@@ -285,22 +287,7 @@ get_client_by_algo(PoolName, Key) ->
                           } = Pool,
             case GetClient(PoolName, Key, Options) of 
                 {ok, Id} ->
-                    case get_client(PoolName, Id) of 
-                        {ok, Client} ->
-                            case IfDebugging of
-                                false->
-                                    {ok, Id, Client, undefined};
-                                true->
-                                    case get_client(PoolName, debug) of 
-                                         {ok, DbgClient} ->
-                                            {ok, Id, Client, DbgClient};
-                                         _->
-                                            {ok, Id, Client, undefined}
-                                    end
-                            end;
-                        _->
-                            {error, no_available_client}
-                    end;
+                    get_client_with_dbg(PoolName, Id, IfDebugging);
                 ErrorGetClientId ->
                     ErrorGetClientId
             end;
@@ -329,3 +316,50 @@ internal_enable_debug(PoolName, Enable) ->
         Error ->
             Error
     end.
+
+get_client_with_dbg(PoolName, Id, IfDebugging) ->
+    case get_client(PoolName, Id) of 
+        {ok, Client} ->
+            case IfDebugging of
+                false->
+                    {ok, Id, Client, undefined};
+                true->
+                    case get_client(PoolName, debug) of 
+                         {ok, DbgClient} ->
+                            {ok, Id, Client, DbgClient};
+                         _->
+                            {ok, Id, Client, undefined}
+                    end
+            end;
+        _->
+            {error, no_available_client}
+    end.
+
+group_pipeline(PoolName, Pipeline) -> 
+    FlattenDatas = group_pipeline_0(PoolName, Pipeline, 1, []),
+    group_pipeline_1(FlattenDatas, orddict:new(), []).
+
+group_pipeline_0(_PoolName, [], _OrderId, Accout) -> lists:reverse(Accout);
+group_pipeline_0(PoolName, [[_Command, Key|_T] = Oneline|Pipeline], OrderId, Accout) -> 
+    Ret = 
+    case ketama:get_object(PoolName, Key) of 
+             {ok, {Id, _Obj}} ->
+                {ok, {Id, {OrderId, Oneline}}};
+             {error, Reason} ->
+                {error, {OrderId, {error, Reason}}}
+    end,
+    group_pipeline_0(PoolName, Pipeline, OrderId+1, [Ret|Accout]).
+
+group_pipeline_1([], NormalDict, ErrorList) -> 
+    {NormalDict, ErrorList};
+group_pipeline_1([{ok,{Id, Oneline}}|T], NormalDict, ErrorList)->
+    NormalDict0 =
+    case orddict:is_key(Id, NormalDict) of
+         true ->
+            orddict:append(Id, Oneline, NormalDict);
+         false ->
+            orddict:store(Id, [Oneline], NormalDict)
+    end,
+    group_pipeline_1(T, NormalDict0, ErrorList);
+group_pipeline_1([{error, Oneline}|T], NormalDict, ErrorList)->
+    group_pipeline_1(T, NormalDict, [Oneline|ErrorList]).
