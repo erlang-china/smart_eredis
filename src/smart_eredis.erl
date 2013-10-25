@@ -41,7 +41,7 @@
 -export([start_pool/1, stop_pool/1]).
 
 %%eredis proxy
--export([q/3, q/4, qp/2, qp/3, q_noreply/3]).
+-export([q/3, q/4, qp/2, qp/3, qp2/3, qp2/4, q_noreply/3]).
 
 -export([enable_debug/2]).
 
@@ -245,10 +245,16 @@ q(PoolName, Key, Command, Timeout) ->
     end.
 
 qp(PoolName, Pipeline) ->
-    qp(PoolName, Pipeline, ?TIMEOUT).
+    qp2(PoolName, undefined, Pipeline, ?TIMEOUT).
 
 qp(PoolName, Pipeline, Timeout) ->
-    {Normal, Exception} = group_pipeline(PoolName, Pipeline),
+    qp2(PoolName, undefined, Pipeline, Timeout).
+
+qp2(PoolName, HashKey, Pipeline) ->
+    qp2(PoolName, HashKey, Pipeline, ?TIMEOUT).
+
+qp2(PoolName, HashKey, Pipeline, Timeout) ->
+    {Normal, Exception} = group_pipeline(PoolName, Pipeline, HashKey),
     RedisRet =
     [ begin
         {Orders, CmdLines} = lists:unzip(Lines),
@@ -335,20 +341,23 @@ get_client_with_dbg(PoolName, Id, IfDebugging) ->
             {error, no_available_client}
     end.
 
-group_pipeline(PoolName, Pipeline) -> 
-    FlattenDatas = group_pipeline_0(PoolName, Pipeline, 1, []),
+get_key(Key, undefined)-> Key;
+get_key(_Key, HashKey)-> HashKey.
+
+group_pipeline(PoolName, Pipeline, HashKey) -> 
+    FlattenDatas = group_pipeline_0(PoolName, Pipeline, HashKey, 1, []),
     group_pipeline_1(FlattenDatas, orddict:new(), []).
 
-group_pipeline_0(_PoolName, [], _OrderId, Accout) -> lists:reverse(Accout);
-group_pipeline_0(PoolName, [[_Command, Key|_T] = Oneline|Pipeline], OrderId, Accout) -> 
+group_pipeline_0(_PoolName, [], _HashKey, _OrderId, Accout) -> lists:reverse(Accout);
+group_pipeline_0(PoolName, [[_Command, Key|_T] = Oneline|Pipeline], HashKey, OrderId, Accout) -> 
     Ret = 
-    case ketama:get_object(PoolName, Key) of 
+    case ketama:get_object(PoolName, get_key(Key, HashKey)) of 
              {ok, {Id, _Obj}} ->
                 {ok, {Id, {OrderId, Oneline}}};
              {error, Reason} ->
                 {error, {OrderId, {error, Reason}}}
     end,
-    group_pipeline_0(PoolName, Pipeline, OrderId+1, [Ret|Accout]).
+    group_pipeline_0(PoolName, Pipeline, HashKey, OrderId+1, [Ret|Accout]).
 
 group_pipeline_1([], NormalDict, ErrorList) -> 
     {NormalDict, ErrorList};
